@@ -26,8 +26,8 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org");
 
 bool waitingForNewCredentials = false;
 
-const char *serverUrl = "http://192.168.1.2/api/sensor_data";
-const char *serverUrlMetadata = "http://192.168.1.2/api/metadata";
+const char *serverUrl = "http://192.168.3.23/api/sensor_data";
+const char *serverUrlMetadata = "http://192.168.3.23/api/metadata";
 
 String lastDescription = "";
 String description = "";
@@ -169,7 +169,36 @@ void sendDataToServer(float raw) {
 
 void sendMetaDataToServer(const String &description) {
     if (WiFiClass::status() == WL_CONNECTED) {
+        HTTPClient http;
+        http.begin(serverUrlMetadata);
 
+        String timestamp = getIsoTimeString();
+
+        String payload = "{";
+        payload += "\"device_name\":\"" + String(device_name) + "\",";
+        payload += "\"timestamp\":\"" + timestamp + "\",";
+        payload += "\"metadata\":[";
+        payload += "{\"key\":\"description\",\"value\":\"" + description + "\"}";
+        payload += "]";
+        payload += "}";
+
+        Serial.print("Metadata Payload: ");
+        Serial.println(payload);
+
+        http.addHeader("Content-Type", "application/json");
+        int httpResponseCode = http.POST(payload);
+
+        if (httpResponseCode > 0) {
+            String response = http.getString();
+            Serial.print("HTTP Response code: ");
+            Serial.println(httpResponseCode);
+            Serial.print("Response: ");
+            Serial.println(response);
+        } else {
+            Serial.print("Error sending metadata. HTTP error code: ");
+            Serial.println(httpResponseCode);
+        }
+        http.end();
     }  else {
         Serial.println("Error: Not connected to Wi-Fi");
     }
