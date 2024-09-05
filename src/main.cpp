@@ -6,6 +6,16 @@
 #include <NTPClient.h>
 #include <Adafruit_NeoPixel.h>
 #include <HTTPClient.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH1106.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+#define OLED_RESET 4
+Adafruit_SH1106 display(OLED_RESET);
 
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789012"
 #define CHARACTERISTIC_UUID "87654321-4321-4321-4321-210987654321"
@@ -204,6 +214,65 @@ void sendMetaDataToServer(const String &description) {
     }
 }
 
+void drawWifiIcon(int x, int y) {
+    display.fillRect(x - 1, y - 10, 20, 20, BLACK);
+
+    for (int i = 1; i <= 3; i++) {
+        if (i == 1) {
+            display.drawCircle(x + 3, y + 5, 3, WHITE);
+        } else if (i == 2) {
+            display.drawCircle(x + 3, y + 5, 6, WHITE);
+        } else if (i == 3) {
+            display.drawCircle(x + 3, y + 5, 9, WHITE);
+        }
+
+        display.drawPixel(x + 3, y + 5, WHITE);
+        display.display();
+
+        delay(200);
+    }
+}
+
+void updateWifiStatus() {
+    display.clearDisplay();
+
+    display.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, WHITE);
+
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor((SCREEN_WIDTH - 60) / 2, 2);  // Center the title based on new width
+    display.println("Wi-Fi Status");
+
+    if (WiFi.status() == WL_CONNECTED) {
+        display.setCursor(13, 16);
+        display.print("SSID: ");
+        display.println(WiFi.SSID());
+
+        display.setCursor(13, 26);
+        int32_t rssi = WiFi.RSSI();
+        display.print("Signal: ");
+        display.print(rssi);
+        display.println(" dBm");
+
+        display.setCursor(13, 36);
+        display.print("IP: ");
+        display.println(WiFi.localIP());
+    } else {
+        display.setTextSize(1);
+        display.setTextColor(WHITE);
+        display.setCursor(35, 26);
+        display.println("Disconnected");
+
+        display.drawRect(0, 50, SCREEN_WIDTH, 14, WHITE);
+        display.setCursor(20, 54);
+        display.print("Last update: ");
+        display.println(millis() / 1000);
+
+        drawWifiIcon(13, 16);
+    }
+
+    display.display();
+}
 
 class JSONCallback : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic *pCharacteristic) override {
@@ -244,6 +313,17 @@ class JSONCallback : public NimBLECharacteristicCallbacks {
 void setup() {
     Serial.begin(115200);
 
+    // display
+    display.begin(SH1106_SWITCHCAPVCC, 0x3C);
+    display.display();
+    delay(2000);
+
+    display.clearDisplay();
+    updateWifiStatus();
+    delay(2000);
+    // end display
+
+    // bl
     device_name = getDeviceName();
 
     strip.begin();
@@ -265,6 +345,7 @@ void setup() {
     NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->start();
+    // end bl
 }
 
 void loop() {
@@ -293,6 +374,8 @@ void loop() {
     }
 
     if (WiFiClass::status() == WL_CONNECTED) {
+        updateWifiStatus();
+
         setPixelColor(0, 255, 0);
 
         sendDataToServer(10.0);
@@ -313,6 +396,8 @@ void loop() {
     }
 
     if (waitingForNewCredentials || ssid.isEmpty()) {
+        updateWifiStatus();
+
         setPixelColor(255, 0, 0);
         delay(1000);
         setPixelColor(0, 0, 0);
