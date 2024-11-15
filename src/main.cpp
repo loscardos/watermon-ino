@@ -28,7 +28,28 @@ Adafruit_SH1106 display(OLED_RESET);
 #define LED_COUNT 1
 #endif
 
-NimBLECharacteristic *pCharacteristic;
+#define PHPIN 4
+#define TDSPIN 6
+
+
+// tds var
+#define VREF 3.3
+#define SCOUNT 30
+
+int analogBuffer[SCOUNT];
+int analogBufferTemp[SCOUNT];
+int analogBufferIndex = 0;
+int copyIndex = 0;
+
+float averageVoltage = 0;
+float tdsValue = 0;
+float temperature = 25;
+
+// end tds var
+float ph;
+float Value = 0;
+
+NimBLECharacteristic* pCharacteristic;
 Preferences preferences;
 
 WiFiUDP ntpUDP;
@@ -36,8 +57,8 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org");
 
 bool waitingForNewCredentials = false;
 
-const char *serverUrl = "http://192.168.3.23/api/sensor_data";
-const char *serverUrlMetadata = "http://192.168.3.23/api/metadata";
+const char* serverUrl = "https://tasamaqmas.com/api/data-sensor";
+const char* serverUrlMetadata = "https://tasamaqmas.com/api/metadata";
 
 String lastDescription = "";
 String description = "";
@@ -48,7 +69,8 @@ String password = "";
 String device_name_prefix = "ESP32_";
 String device_name;
 
-typedef struct struct_peerInfo {
+typedef struct struct_peerInfo
+{
     uint8_t mac[6];
     int deviceNumber;
 } peerInfo_t;
@@ -59,14 +81,45 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel(LED_COUNT, PIN, NEO_GRB + NEO_KHZ800
 
 void setPixelColor(uint8_t r, uint8_t g, uint8_t b)
 {
-    for (uint16_t i = 0; i < strip.numPixels(); i++) {
+    for (uint16_t i = 0; i < strip.numPixels(); i++)
+    {
         strip.setPixelColor(i, Adafruit_NeoPixel::Color(r, g, b));
     }
 
     strip.show();
 }
 
-String getIsoTimeString() {
+int getMedianNum(int bArray[], int iFilterLen)
+{
+    int bTab[iFilterLen];
+    for (byte i = 0; i < iFilterLen; i++)
+        bTab[i] = bArray[i];
+    int i, j, bTemp;
+    for (j = 0; j < iFilterLen - 1; j++)
+    {
+        for (i = 0; i < iFilterLen - j - 1; i++)
+        {
+            if (bTab[i] > bTab[i + 1])
+            {
+                bTemp = bTab[i];
+                bTab[i] = bTab[i + 1];
+                bTab[i + 1] = bTemp;
+            }
+        }
+    }
+    if ((iFilterLen & 1) > 0)
+    {
+        bTemp = bTab[(iFilterLen - 1) / 2];
+    }
+    else
+    {
+        bTemp = (bTab[iFilterLen / 2] + bTab[iFilterLen / 2 - 1]) / 2;
+    }
+    return bTemp;
+}
+
+String getIsoTimeString()
+{
     timeClient.update();
     unsigned long epochTime = timeClient.getEpochTime();
     time_t now = epochTime;
@@ -79,7 +132,8 @@ String getIsoTimeString() {
     return {iso_time};
 }
 
-String getDeviceName() {
+String getDeviceName()
+{
     uint8_t baseMac[6];
     esp_read_mac(baseMac, ESP_MAC_WIFI_STA);
     char baseMacChr[18] = {0};
@@ -87,23 +141,27 @@ String getDeviceName() {
     return {baseMacChr};
 }
 
-void connectToWiFi(const char *ssid, const char *password) {
+void connectToWiFi(const char* ssid, const char* password)
+{
     unsigned long startTime;
     unsigned long timeout = 3000;
     int maxRetries = 2;
     int retryCount = 0;
     bool connected = false;
 
-    while (!connected && retryCount < maxRetries) {
+    while (!connected && retryCount < maxRetries)
+    {
         WiFi.disconnect();
         WiFi.begin(ssid, password);
         Serial.print("Connecting to Wi-Fi");
         startTime = millis();
-        while (WiFiClass::status() != WL_CONNECTED) {
+        while (WiFiClass::status() != WL_CONNECTED)
+        {
             delay(500);
             Serial.print(".");
 
-            if (millis() - startTime > timeout) {
+            if (millis() - startTime > timeout)
+            {
                 Serial.println("");
                 Serial.print("Connection attempt timed out. Retry ");
                 Serial.print(retryCount + 1);
@@ -114,14 +172,18 @@ void connectToWiFi(const char *ssid, const char *password) {
             }
         }
 
-        if (WiFiClass::status() == WL_CONNECTED) {
+        if (WiFiClass::status() == WL_CONNECTED)
+        {
             connected = true;
-        } else {
+        }
+        else
+        {
             retryCount++;
         }
     }
 
-    if (connected) {
+    if (connected)
+    {
         Serial.println("");
         Serial.print("Connected. IP address: ");
         Serial.println(WiFi.localIP());
@@ -129,7 +191,9 @@ void connectToWiFi(const char *ssid, const char *password) {
         timeClient.update();
         preferences.putString("ssid", ssid);
         preferences.putString("password", password);
-    } else {
+    }
+    else
+    {
         Serial.print("Failed to connect after ");
         Serial.print(maxRetries);
         Serial.println(" attempts. Giving up.");
@@ -139,8 +203,10 @@ void connectToWiFi(const char *ssid, const char *password) {
     }
 }
 
-void sendDataToServer(float raw) {
-    if (WiFiClass::status() == WL_CONNECTED) {
+void sendDataToServer(float raw)
+{
+    if (WiFiClass::status() == WL_CONNECTED)
+    {
         HTTPClient http;
         http.begin(serverUrl);
 
@@ -160,25 +226,31 @@ void sendDataToServer(float raw) {
         http.addHeader("Content-Type", "application/json");
         int httpResponseCode = http.POST(payload);
 
-        if (httpResponseCode > 0) {
+        if (httpResponseCode > 0)
+        {
             String response = http.getString();
             Serial.print("HTTP Response code: ");
             Serial.println(httpResponseCode);
             Serial.print("Response: ");
             Serial.println(response);
-        } else {
+        }
+        else
+        {
             Serial.print("Error sending data. HTTP error code: ");
             Serial.println(httpResponseCode);
         }
         http.end();
-    } else {
+    }
+    else
+    {
         Serial.println("Error: Not connected to Wi-Fi");
     }
 }
 
-
-void sendMetaDataToServer(const String &description) {
-    if (WiFiClass::status() == WL_CONNECTED) {
+void sendMetaDataToServer(const String& description)
+{
+    if (WiFiClass::status() == WL_CONNECTED)
+    {
         HTTPClient http;
         http.begin(serverUrlMetadata);
 
@@ -198,31 +270,43 @@ void sendMetaDataToServer(const String &description) {
         http.addHeader("Content-Type", "application/json");
         int httpResponseCode = http.POST(payload);
 
-        if (httpResponseCode > 0) {
+        if (httpResponseCode > 0)
+        {
             String response = http.getString();
             Serial.print("HTTP Response code: ");
             Serial.println(httpResponseCode);
             Serial.print("Response: ");
             Serial.println(response);
-        } else {
+        }
+        else
+        {
             Serial.print("Error sending metadata. HTTP error code: ");
             Serial.println(httpResponseCode);
         }
         http.end();
-    }  else {
+    }
+    else
+    {
         Serial.println("Error: Not connected to Wi-Fi");
     }
 }
 
-void drawWifiIcon(int x, int y) {
+void drawWifiIcon(int x, int y)
+{
     display.fillRect(x - 1, y - 10, 20, 20, BLACK);
 
-    for (int i = 1; i <= 3; i++) {
-        if (i == 1) {
+    for (int i = 1; i <= 3; i++)
+    {
+        if (i == 1)
+        {
             display.drawCircle(x + 3, y + 5, 3, WHITE);
-        } else if (i == 2) {
+        }
+        else if (i == 2)
+        {
             display.drawCircle(x + 3, y + 5, 6, WHITE);
-        } else if (i == 3) {
+        }
+        else if (i == 3)
+        {
             display.drawCircle(x + 3, y + 5, 9, WHITE);
         }
 
@@ -233,17 +317,19 @@ void drawWifiIcon(int x, int y) {
     }
 }
 
-void updateWifiStatus() {
+void updateWifiStatus()
+{
     display.clearDisplay();
 
     display.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, WHITE);
 
     display.setTextSize(1);
     display.setTextColor(WHITE);
-    display.setCursor((SCREEN_WIDTH - 60) / 2, 2);  // Center the title based on new width
+    display.setCursor((SCREEN_WIDTH - 60) / 2, 2); // Center the title based on new width
     display.println("Wi-Fi Status");
 
-    if (WiFi.status() == WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECTED)
+    {
         display.setCursor(13, 16);
         display.print("SSID: ");
         display.println(WiFi.SSID());
@@ -257,7 +343,9 @@ void updateWifiStatus() {
         display.setCursor(13, 36);
         display.print("IP: ");
         display.println(WiFi.localIP());
-    } else {
+    }
+    else
+    {
         display.setTextSize(1);
         display.setTextColor(WHITE);
         display.setCursor(35, 26);
@@ -274,8 +362,10 @@ void updateWifiStatus() {
     display.display();
 }
 
-class JSONCallback : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic *pCharacteristic) override {
+class JSONCallback : public NimBLECharacteristicCallbacks
+{
+    void onWrite(NimBLECharacteristic* pCharacteristic) override
+    {
         std::string receivedData = pCharacteristic->getValue();
 
         receivedData.erase(remove(receivedData.begin(), receivedData.end(), '\\'), receivedData.end());
@@ -283,34 +373,42 @@ class JSONCallback : public NimBLECharacteristicCallbacks {
         DynamicJsonDocument doc(1024);
         DeserializationError error = deserializeJson(doc, receivedData);
 
-        if (!error) {
-            if (doc.containsKey("ssid") && doc.containsKey("passwd")) {
+        if (!error)
+        {
+            if (doc.containsKey("ssid") && doc.containsKey("passwd"))
+            {
                 ssid = doc["ssid"].as<String>();
                 password = doc["passwd"].as<String>();
 
                 waitingForNewCredentials = true;
             }
 
-            if (doc.containsKey("description")) {
+            if (doc.containsKey("description"))
+            {
                 description = doc["description"].as<String>();
 
-                if (description == "forgot") {
+                if (description == "forgot")
+                {
                     preferences.putString("ssid", "");
                     preferences.putString("password", "");
-                    ssid = ""; password = "";
+                    ssid = "";
+                    password = "";
 
                     WiFi.disconnect();
                     waitingForNewCredentials = true;
                 }
             }
-        } else {
+        }
+        else
+        {
             Serial.print("Failed to parse JSON: ");
             Serial.println(error.c_str());
         }
     }
 };
 
-void setup() {
+void setup()
+{
     Serial.begin(115200);
 
     // display
@@ -331,8 +429,8 @@ void setup() {
 
     NimBLEDevice::init("ESP32-S3");
 
-    NimBLEServer *pServer = NimBLEDevice::createServer();
-    NimBLEService *pService = pServer->createService(SERVICE_UUID);
+    NimBLEServer* pServer = NimBLEDevice::createServer();
+    NimBLEService* pService = pServer->createService(SERVICE_UUID);
 
     pCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID,
@@ -342,15 +440,64 @@ void setup() {
     pCharacteristic->setCallbacks(new JSONCallback());
 
     pService->start();
-    NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->start();
     // end bl
+
+    // tds
+    pinMode(TDSPIN,INPUT);
+    pinMode(PHPIN,INPUT);
+    // end tds
 }
 
-void loop() {
-    if (waitingForNewCredentials) {
-        if (WiFiClass::status() != WL_CONNECTED) {
+void loop()
+{
+    // tds
+    static unsigned long analogSampleTimepoint = millis();
+    if (millis() - analogSampleTimepoint > 40U)
+    {
+        analogSampleTimepoint = millis();
+        analogBuffer[analogBufferIndex] = analogRead(TDSPIN);
+        analogBufferIndex++;
+        if (analogBufferIndex == SCOUNT)
+        {
+            analogBufferIndex = 0;
+        }
+    }
+
+    static unsigned long printTimepoint = millis();
+    if (millis() - printTimepoint > 800U)
+    {
+        printTimepoint = millis();
+        for (copyIndex = 0; copyIndex < SCOUNT; copyIndex++)
+        {
+            analogBufferTemp[copyIndex] = analogBuffer[copyIndex];
+
+            averageVoltage = getMedianNum(analogBufferTemp,SCOUNT) * (float)VREF / 4096.0;
+
+            float compensationCoefficient = 1.0 + 0.02 * (temperature - 25.0);
+            float compensationVoltage = averageVoltage / compensationCoefficient;
+
+            tdsValue = (133.42 * compensationVoltage * compensationVoltage * compensationVoltage
+                - 255.86 * compensationVoltage * compensationVoltage
+                + 857.39 * compensationVoltage) * 0.5;
+        }
+    }
+    // end tds
+
+    // ph
+    Value = analogRead(PHPIN);
+    float voltage = Value * (3.3 / 4095.0);
+
+    ph = (3.3 * voltage);
+
+    // end ph
+
+    if (waitingForNewCredentials)
+    {
+        if (WiFiClass::status() != WL_CONNECTED)
+        {
             connectToWiFi(ssid.c_str(), password.c_str());
         }
 
@@ -368,34 +515,44 @@ void loop() {
     }
 
     if (!waitingForNewCredentials && description.length() > 0 && description !=
-        lastDescription) {
+        lastDescription)
+    {
         lastDescription = description;
         description = "";
     }
 
-    if (WiFiClass::status() == WL_CONNECTED) {
+    if (WiFiClass::status() == WL_CONNECTED)
+    {
         updateWifiStatus();
 
         setPixelColor(0, 255, 0);
 
-        sendDataToServer(10.0);
+        sendDataToServer(tdsValue);
+        sendDataToServer(ph);
+
         delay(5000);
-    } else {
+    }
+    else
+    {
         ssid = preferences.getString("ssid", "");
         password = preferences.getString("password", "");
 
-        if (!waitingForNewCredentials && !ssid.isEmpty() && !password.isEmpty()) {
-            if (ssid.length() > 0 && password.length() > 0) {
+        if (!waitingForNewCredentials && !ssid.isEmpty() && !password.isEmpty())
+        {
+            if (ssid.length() > 0 && password.length() > 0)
+            {
                 connectToWiFi(ssid.c_str(), password.c_str());
             }
 
-            if (WiFiClass::status() != WL_CONNECTED) {
+            if (WiFiClass::status() != WL_CONNECTED)
+            {
                 waitingForNewCredentials = true;
             }
         }
     }
 
-    if (waitingForNewCredentials || ssid.isEmpty()) {
+    if (waitingForNewCredentials || ssid.isEmpty())
+    {
         updateWifiStatus();
 
         setPixelColor(255, 0, 0);
