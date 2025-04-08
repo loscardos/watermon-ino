@@ -57,8 +57,8 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org");
 
 bool waitingForNewCredentials = false;
 
-const char* serverUrl = "https://tasamaqmas.com/api/data-sensor";
-const char* serverUrlMetadata = "https://tasamaqmas.com/api/metadata";
+String serverUrl = "https://tasamaqmas.com/api/data-sensor";
+String serverUrlMetadata = "https://tasamaqmas.com/api/metadata";
 
 String lastDescription = "";
 String description = "";
@@ -397,6 +397,12 @@ class JSONCallback : public NimBLECharacteristicCallbacks
                     WiFi.disconnect();
                     waitingForNewCredentials = true;
                 }
+
+                if (description == "baseurl")
+                {
+                    serverUrl = doc["serverUrl"].as<String>();
+                    serverUrlMetadata = doc["serverUrlMetadata"].as<String>();
+                }
             }
         }
         else
@@ -482,6 +488,9 @@ void loop()
             tdsValue = (133.42 * compensationVoltage * compensationVoltage * compensationVoltage
                 - 255.86 * compensationVoltage * compensationVoltage
                 + 857.39 * compensationVoltage) * 0.5;
+
+            Serial.print("Read TDS : ");
+            Serial.println(tdsValue);
         }
     }
     // end tds
@@ -491,6 +500,9 @@ void loop()
     float voltage = Value * (3.3 / 4095.0);
 
     ph = (3.3 * voltage);
+
+    Serial.print("Read PH : ");
+    Serial.println(ph);
 
     // end ph
 
